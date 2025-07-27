@@ -10,7 +10,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ✅ Create "uploads" folder if it doesn't exist
+// ✅ Ensure "uploads" folder exists
 if (!fs.existsSync("uploads")) {
   fs.mkdirSync("uploads");
 }
@@ -27,7 +27,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// ✅ File upload endpoint
+// ✅ File upload endpoint with JSON metadata saving
 app.post("/api/upload", upload.single("file"), (req, res) => {
   const { type, accountant, client, notes } = req.body;
   const file = req.file;
@@ -37,21 +37,65 @@ app.post("/api/upload", upload.single("file"), (req, res) => {
   }
 
   const metadata = {
-    filename: file.filename,
-    originalName: file.originalname,
-    path: file.path,
-    type,
-    accountant,
     client,
+    fileName: file.filename,
+    originalName: file.originalname,
+    type,
     notes,
-    uploadedAt: new Date().toISOString(),
+    uploadDate: new Date().toISOString(),
+    aiNote: "", // Placeholder for future AI annotations
+    isReviewed: false,
   };
 
-  console.log("📥 Received upload:", metadata);
-  return res.status(200).json({ message: "File uploaded", metadata });
+  // ✅ Create folder for accountant
+  const accountantFolder = path.join("uploads", accountant);
+  if (!fs.existsSync(accountantFolder)) {
+    fs.mkdirSync(accountantFolder, { recursive: true });
+  }
+
+  // ✅ Save metadata into accountant-specific JSON file
+  const filePath = path.join(accountantFolder, "files.json");
+  let existing = [];
+  if (fs.existsSync(filePath)) {
+    try {
+      const data = fs.readFileSync(filePath);
+      existing = JSON.parse(data);
+    } catch (err) {
+      console.error("❌ Error reading existing metadata:", err);
+    }
+  }
+
+  existing.push(metadata);
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2));
+    console.log("📥 File saved + metadata written:", metadata);
+    res.status(200).json({ message: "File uploaded", metadata });
+  } catch (err) {
+    console.error("❌ Error writing metadata:", err);
+    res.status(500).json({ error: "Failed to save metadata" });
+  }
 });
 
-// ✅ AI chat endpoint (existing)
+// ✅ Fetch uploaded files for a specific accountant
+app.get("/api/files/:accountant", (req, res) => {
+  const accountant = req.params.accountant;
+  const filePath = path.join("uploads", accountant, "files.json");
+
+  if (!fs.existsSync(filePath)) {
+    return res.json([]); // No files yet
+  }
+
+  try {
+    const data = fs.readFileSync(filePath);
+    const files = JSON.parse(data);
+    res.json(files);
+  } catch (error) {
+    console.error("❌ Error loading file list:", error);
+    res.status(500).json({ error: "Failed to load files" });
+  }
+});
+
+// ✅ AI chat endpoint (unchanged)
 app.post("/api/chat", async (req, res) => {
   const userMessage = req.body.message;
 
@@ -87,6 +131,7 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
+// ✅ Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ Server is running on port ${PORT}`);
