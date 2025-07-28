@@ -1,145 +1,117 @@
 // index.js
-const express = require("express");
-const cors = require("cors");
-const axios = require("axios");
-require("dotenv").config();
-const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
+import express from "express";
+import cors from "cors";
+import multer from "multer";
+import { createClient } from "@supabase/supabase-js";
+import dotenv from "dotenv";
+dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Ensure the "uploads" directory exists
-if (!fs.existsSync("uploads")) {
-  fs.mkdirSync("uploads");
-}
+// Multer: buffer file in memory
+const upload = multer({ storage: multer.memoryStorage() });
 
-// Multer configuration for storing uploaded files
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/"),
-  filename: (req, file, cb) => {
-    const uniqueName = `${Date.now()}-${file.originalname}`;
-    cb(null, uniqueName);
-  },
-});
-const upload = multer({ storage });
+// Initialize Supabase client (server‑side only)
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 /**
  * POST /api/upload
- * Handles a single file upload per request (field name: "file"),
- * saves the file in uploads/{accountant}/, and writes metadata to files.json
+ * Uploads a single file into Supabase Storage under {accountant}/{client}/
  */
-app.post("/api/upload", upload.single("file"), (req, res) => {
+app.post("/api/upload", upload.single("file"), async (req, res) => {
   try {
     const { type, accountant, client, notes } = req.body;
     const file = req.file;
 
-    // Validate presence of file and required fields
-    if (!file) {
-      return res.status(400).json({ error: "No file uploaded." });
-    }
-    if (!accountant || !client) {
-      return res.status(400).json({ error: "Missing accountant or client name." });
+    if (!file || !accountant || !client) {
+      return res.status(400).json({ error: "Missing file, accountant, or client." });
     }
 
-    // Create accountant-specific folder if needed
-    const acctDir = path.join("uploads", accountant);
-    if (!fs.existsSync(acctDir)) {
-      fs.mkdirSync(acctDir, { recursive: true });
-    }
+    const key = `${accountant}/${client}/${Date.now()}-${file.originalname}`;
 
-    // Read existing metadata
-    const metaFile = path.join(acctDir, "files.json");
-    let existing = [];
-    if (fs.existsSync(metaFile)) {
-      try {
-        existing = JSON.parse(fs.readFileSync(metaFile, "utf8"));
-      } catch (err) {
-        console.warn("Warning: could not parse existing metadata.", err);
-      }
-    }
+    const { error: uploadError } = await supabase.storage
+      .from("deltax-uploads")
+      .upload(key, file.buffer, { contentType: file.mimetype });
 
-    // Build metadata entry for this file
-    const entry = {
-      client,
-      fileName: file.filename,
-      originalName: file.originalname,
-      type: type || "",
-      notes: notes || "",
-      uploadDate: new Date().toISOString(),
-      aiNote: "",
-      isReviewed: false,
-    };
+    if (uploadError) throw uploadError;
 
-    // Append and save
-    existing.push(entry);
-    fs.writeFileSync(metaFile, JSON.stringify(existing, null, 2), "utf8");
-
-    console.log("✅ Uploaded and saved metadata:", entry);
-    return res.status(200).json({ message: "File uploaded", metadata: entry });
+    return res.status(200).json({ message: "File uploaded", key });
   } catch (err) {
-    console.error("🔴 Upload handler error:", err);
-    return res.status(500).json({
-      error: err.message,
-      stack: err.stack?.split("\n"),
-    });
+    console.error("🔴 Upload failed:", err);
+    return res.status(500).json({ error: err.message });
   }
 });
 
 /**
- * GET /api/files/:accountant
- * Returns all metadata entries for the given accountant
+ * GET /api/files/:accountant?client=...
+ * Lists all files for that accountant+client, returning signed URLs.
  */
-app.get("/api/files/:accountant", (req, res) => {
-  const acct = req.params.accountant;
-  const metaFile = path.join("uploads", acct, "files.json");
-
-  if (!fs.existsSync(metaFile)) {
-    return res.json([]);
-  }
-
+app.get("/api/files/:accountant", async (req, res) => {
   try {
-    const files = JSON.parse(fs.readFileSync(metaFile, "utf8"));
+    const accountant = req.params.accountant;
+    const client = req.query.client;
+    if (!client) {
+      return res.status(400).json({ error: "Missing client query parameter." });
+    }
+
+    const prefix = `${accountant}/${client}/`;
+    const { data, error: listError } = await supabase.storage
+      .from("deltax-uploads")
+      .list(prefix, { limit: 100, offset: 0, sortBy: { column: "name", order: "asc" } });
+
+    if (listError) throw listError;
+
+    const files = await Promise.all(
+      data.map(async (obj) => {
+        const { signedURL, error: urlError } = await supabase.storage
+          .from("deltax-uploads")
+          .createSignedUrl(obj.name, 60 * 60);
+        if (urlError) throw urlError;
+        return { name: obj.name, url: signedURL };
+      })
+    );
+
     return res.json(files);
   } catch (err) {
-    console.error("🔴 Error reading metadata:", err);
-    return res.status(500).json({ error: "Failed to load files." });
+    console.error("🔴 Listing failed:", err);
+    return res.status(500).json({ error: err.message });
   }
 });
 
 /**
  * POST /api/chat
- * Proxies messages to OpenAI for an accounting assistant
+ * (unchanged) Proxies to OpenAI
  */
+import axios from "axios";
 app.post("/api/chat", async (req, res) => {
-  const userMessage = req.body.message;
   try {
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
       {
         model: "gpt-4.1-mini",
         messages: [
-          { role: "system", content: "You are a helpful and concise accounting assistant called Moouris." },
-          { role: "user", content: userMessage },
+          { role: "system", content: "You are a helpful accounting assistant." },
+          { role: "user", content: req.body.message },
         ],
-        temperature: 0.7,
       },
       {
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         },
       }
     );
-    return res.json({ reply: response.data.choices[0].message.content });
+    res.json({ reply: response.data.choices[0].message.content });
   } catch (err) {
     console.error("🔴 OpenAI API Error:", err.response?.data || err.message);
-    return res.status(500).json({ error: "OpenAI Error", details: err.response?.data || err.message });
+    res.status(500).json({ error: "OpenAI Error", details: err.response?.data || err.message });
   }
 });
 
-// Start the server
+// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
