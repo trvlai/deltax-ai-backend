@@ -7,29 +7,22 @@ import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 import axios from "axios";
 
-// Load environment variables from .env (or Render's ENV)
 dotenv.config();
 
-// Initialize Express
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Configure Multer to buffer uploads in memory
+// Use in‑memory storage so we never write to disk
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Initialize Supabase client (server‑side only)
+// Supabase client (server‑side only)
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-/**
- * POST /api/upload
- * - Expects form‑data: file, accountant, client, type, notes
- * - Uploads to Supabase Storage under bucket "deltax-uploads"
- * - Returns { message, key }
- */
+// POST /api/upload
 app.post("/api/upload", upload.single("file"), async (req, res) => {
   try {
     const { accountant, client, type, notes } = req.body;
@@ -47,7 +40,6 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       .upload(key, file.buffer, { contentType: file.mimetype });
 
     if (uploadError) throw uploadError;
-
     return res.status(200).json({ message: "File uploaded", key });
   } catch (err) {
     console.error("🔴 Upload failed:", err);
@@ -55,11 +47,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   }
 });
 
-/**
- * GET /api/files/:accountant?client=...
- * - Lists files under accountant/client prefix
- * - Returns [{ name, url }, …] where url is a 1‑hour signed URL
- */
+// GET /api/files/:accountant?client=...
 app.get("/api/files/:accountant", async (req, res) => {
   try {
     const { accountant } = req.params;
@@ -75,13 +63,10 @@ app.get("/api/files/:accountant", async (req, res) => {
     const prefix = `${accountant}/${client}/`;
     const { data, error: listError } = await supabase.storage
       .from("deltax-uploads")
-      .list(prefix, {
-        limit: 100,
-        offset: 0,
-        sortBy: { column: "name", order: "asc" },
-      });
+      .list(prefix, { limit: 100, offset: 0, sortBy: { column: "name", order: "asc" } });
     if (listError) throw listError;
 
+    // Return both name and signed URL
     const files = await Promise.all(
       data.map(async (obj) => {
         const fullPath = `${prefix}${obj.name}`;
@@ -100,12 +85,7 @@ app.get("/api/files/:accountant", async (req, res) => {
   }
 });
 
-/**
- * POST /api/chat
- * - Expects JSON { message }
- * - Proxies to OpenAI Chat API
- * - Returns { reply }
- */
+// POST /api/chat
 app.post("/api/chat", async (req, res) => {
   try {
     const userMessage = req.body.message;
@@ -114,23 +94,17 @@ app.post("/api/chat", async (req, res) => {
       {
         model: "gpt-4.1-mini",
         messages: [
-          {
-            role: "system",
-            content:
-              "You are a helpful accounting assistant integrated into Deltax.",
-          },
+          { role: "system", content: "You are a helpful accounting assistant." },
           { role: "user", content: userMessage },
         ],
         temperature: 0.7,
       },
       {
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         },
       }
     );
-
     const reply = response.data.choices[0].message.content;
     return res.status(200).json({ reply });
   } catch (err) {
@@ -141,6 +115,6 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-// Start the server (Render sets process.env.PORT)
+// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
