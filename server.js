@@ -7,22 +7,29 @@ import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 import axios from "axios";
 
+// Load environment variables from .env (or Render's ENV)
 dotenv.config();
 
+// Initialize Express
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Buffer uploads in memory
+// Configure Multer to buffer uploads in memory
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Supabase client (server‑side)
+// Initialize Supabase client (server‑side only)
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// POST /api/upload
+/**
+ * POST /api/upload
+ * - Expects form‑data: file, accountant, client, type, notes
+ * - Uploads to Supabase Storage under bucket "deltax-uploads"
+ * - Returns { message, key }
+ */
 app.post("/api/upload", upload.single("file"), async (req, res) => {
   try {
     const { accountant, client, type, notes } = req.body;
@@ -40,6 +47,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       .upload(key, file.buffer, { contentType: file.mimetype });
 
     if (uploadError) throw uploadError;
+
     return res.status(200).json({ message: "File uploaded", key });
   } catch (err) {
     console.error("🔴 Upload failed:", err);
@@ -47,11 +55,14 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   }
 });
 
-// GET /api/files/:accountant?client=...
+/**
+ * GET /api/files/:accountant?client=...
+ * - Lists files under accountant/client prefix
+ * - Returns [{ name, url }, …] where url is a 1‑hour signed URL
+ */
 app.get("/api/files/:accountant", async (req, res) => {
   try {
     const { accountant } = req.params;
-    // req.query.client might be a string or array; normalize to string
     let clientParam = req.query.client;
     const client = Array.isArray(clientParam) ? clientParam[0] : clientParam;
 
@@ -74,10 +85,9 @@ app.get("/api/files/:accountant", async (req, res) => {
     const files = await Promise.all(
       data.map(async (obj) => {
         const fullPath = `${prefix}${obj.name}`;
-        const { signedURL, error: urlError } =
-          await supabase.storage
-            .from("deltax-uploads")
-            .createSignedUrl(fullPath, 60 * 60);
+        const { signedURL, error: urlError } = await supabase.storage
+          .from("deltax-uploads")
+          .createSignedUrl(fullPath, 60 * 60);
         if (urlError) throw urlError;
         return { name: obj.name, url: signedURL };
       })
@@ -90,7 +100,12 @@ app.get("/api/files/:accountant", async (req, res) => {
   }
 });
 
-// POST /api/chat
+/**
+ * POST /api/chat
+ * - Expects JSON { message }
+ * - Proxies to OpenAI Chat API
+ * - Returns { reply }
+ */
 app.post("/api/chat", async (req, res) => {
   try {
     const userMessage = req.body.message;
@@ -101,7 +116,8 @@ app.post("/api/chat", async (req, res) => {
         messages: [
           {
             role: "system",
-            content: "You are a helpful accounting assistant integrated into Deltax.",
+            content:
+              "You are a helpful accounting assistant integrated into Deltax.",
           },
           { role: "user", content: userMessage },
         ],
@@ -114,6 +130,7 @@ app.post("/api/chat", async (req, res) => {
         },
       }
     );
+
     const reply = response.data.choices[0].message.content;
     return res.status(200).json({ reply });
   } catch (err) {
@@ -124,6 +141,6 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-// Start the server on the port Render provides
+// Start the server (Render sets process.env.PORT)
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
