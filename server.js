@@ -14,22 +14,21 @@ app.use(express.json());
 // In-memory uploads
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Supabase client (server-side only)
+// Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// POST /api/upload
+// === FILE UPLOAD ===
 app.post("/api/upload", upload.single("file"), async (req, res) => {
   try {
     const { accountant, client, type, notes } = req.body;
     const file = req.file;
 
     if (!file || !accountant || !client) {
-      return res
-        .status(400)
-        .json({ error: "Missing file, accountant, or client." });
+      res.status(400).json({ error: "Missing file, accountant, or client." });
+      return;
     }
 
     const key = `${accountant}/${client}/${Date.now()}-${file.originalname}`;
@@ -38,20 +37,19 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       .upload(key, file.buffer, { contentType: file.mimetype });
 
     if (uploadError) throw uploadError;
-    return res.status(200).json({ message: "File uploaded", key });
+
+    res.setHeader("Content-Type", "application/json");
+    res.status(200).send(JSON.stringify({ message: "File uploaded", key }));
   } catch (err) {
     console.error("🔴 Upload failed:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ✅ NEW FIXED VERSION
-// GET /api/files/:accountant
+// === GET FILE LIST FOR ACCOUNTANT ===
 app.get("/api/files/:accountant", async (req, res) => {
   try {
     const { accountant } = req.params;
-
-    // List all client folders under this accountant
     const { data: folders, error: folderError } = await supabase.storage
       .from("deltax-uploads")
       .list(`${accountant}/`, { limit: 100 });
@@ -88,19 +86,19 @@ app.get("/api/files/:accountant", async (req, res) => {
         allFiles.push({
           name: obj.name,
           url: signedUrl,
-          client: folder.name, // ← Needed for frontend to filter
+          client: folder.name,
         });
       }
     }
 
-    return res.status(200).json(allFiles);
+    res.status(200).json(allFiles);
   } catch (err) {
     console.error("🔴 Listing failed:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// POST /api/chat
+// === CHAT ROUTE ===
 app.post("/api/chat", async (req, res) => {
   try {
     const userMessage = req.body.message;
@@ -121,16 +119,16 @@ app.post("/api/chat", async (req, res) => {
       }
     );
     const reply = response.data.choices[0].message.content;
-    return res.status(200).json({ reply });
+    res.status(200).json({ reply });
   } catch (err) {
     console.error("🔴 OpenAI API Error:", err.response?.data || err.message);
-    return res.status(500).json({
+    res.status(500).json({
       error: "OpenAI Error",
       details: err.response?.data || err.message,
     });
   }
 });
 
-// Start server
+// === START SERVER ===
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
