@@ -1,5 +1,3 @@
-// server.js
-
 import express from "express";
 import cors from "cors";
 import multer from "multer";
@@ -13,10 +11,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// In‑memory uploads
+// In-memory uploads
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Supabase client (server‑side only)
+// Supabase client (server-side only)
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -47,34 +45,37 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   }
 });
 
-// GET /api/files/:accountant?client=...
+// ✅ NEW FIXED VERSION
+// GET /api/files/:accountant
 app.get("/api/files/:accountant", async (req, res) => {
   try {
     const { accountant } = req.params;
-    let cp = req.query.client;
-    const client = Array.isArray(cp) ? cp[0] : cp;
 
-    if (!client) {
-      return res
-        .status(400)
-        .json({ error: "Missing client query parameter." });
-    }
-
-    const prefix = `${accountant}/${client}/`;
-    const { data, error: listError } = await supabase.storage
+    // List all client folders under this accountant
+    const { data: folders, error: folderError } = await supabase.storage
       .from("deltax-uploads")
-      .list(prefix, {
-        limit: 100,
-        offset: 0,
-        sortBy: { column: "name", order: "asc" },
-      });
-    if (listError) throw listError;
+      .list(`${accountant}/`, { limit: 100 });
 
-    const files = await Promise.all(
-      data.map(async (obj) => {
+    if (folderError) throw folderError;
+
+    const allFiles = [];
+
+    for (const folder of folders) {
+      if (!folder.name) continue;
+      const prefix = `${accountant}/${folder.name}/`;
+
+      const { data: files, error: listError } = await supabase.storage
+        .from("deltax-uploads")
+        .list(prefix, {
+          limit: 100,
+          offset: 0,
+          sortBy: { column: "name", order: "asc" },
+        });
+
+      if (listError) throw listError;
+
+      for (const obj of files) {
         const fullPath = `${prefix}${obj.name}`;
-
-        // Correctly extract signedUrl from data
         const {
           data: { signedUrl },
           error: urlError,
@@ -83,11 +84,16 @@ app.get("/api/files/:accountant", async (req, res) => {
           .createSignedUrl(fullPath, 60 * 60);
 
         if (urlError) throw urlError;
-        return { name: obj.name, url: signedUrl };
-      })
-    );
 
-    return res.status(200).json(files);
+        allFiles.push({
+          name: obj.name,
+          url: signedUrl,
+          client: folder.name, // ← Needed for frontend to filter
+        });
+      }
+    }
+
+    return res.status(200).json(allFiles);
   } catch (err) {
     console.error("🔴 Listing failed:", err);
     return res.status(500).json({ error: err.message });
@@ -118,9 +124,10 @@ app.post("/api/chat", async (req, res) => {
     return res.status(200).json({ reply });
   } catch (err) {
     console.error("🔴 OpenAI API Error:", err.response?.data || err.message);
-    return res
-      .status(500)
-      .json({ error: "OpenAI Error", details: err.response?.data || err.message });
+    return res.status(500).json({
+      error: "OpenAI Error",
+      details: err.response?.data || err.message,
+    });
   }
 });
 
