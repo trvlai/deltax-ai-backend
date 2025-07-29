@@ -4,9 +4,8 @@ import multer from "multer";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 import axios from "axios";
-
-import generateReportRoute from "./routes/generateReport.js"; // ✅ Existing
-import chatWithDocsRoute from "./routes/chatWithDocs.js";     // ✅ NEW LINE
+import generateReportRoute from "./routes/generateReport.js";
+import chatWithDocsRoute from "./routes/chatWithDocs.js";
 
 dotenv.config();
 
@@ -23,7 +22,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// === FILE UPLOAD ===
+// === FILE UPLOAD with auto-embedding ===
 app.post("/api/upload", upload.single("file"), async (req, res) => {
   try {
     const { accountant, client, type, notes } = req.body;
@@ -34,17 +33,67 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       return;
     }
 
-    const key = `${accountant}/${client}/${Date.now()}-${file.originalname}`;
+    const filename = `${Date.now()}-${file.originalname}`;
+    const key = `${accountant}/${client}/${filename}`;
+
+    // 1. Upload to Supabase Storage
     const { error: uploadError } = await supabase.storage
       .from("deltax-uploads")
       .upload(key, file.buffer, { contentType: file.mimetype });
 
     if (uploadError) throw uploadError;
 
-    res.setHeader("Content-Type", "application/json");
-    res.status(200).send(JSON.stringify({ message: "File uploaded", key }));
+    // 2. Extract text from PDF
+    const pdfParse = await import("pdf-parse");
+    const data = await pdfParse.default(file.buffer);
+    const fullText = data.text;
+
+    // 3. Chunk text (e.g. every ~500 chars)
+    const chunks = [];
+    const chunkSize = 500;
+    for (let i = 0; i < fullText.length; i += chunkSize) {
+      chunks.push(fullText.slice(i, i + chunkSize));
+    }
+
+    // 4. Embed and insert into knowledge_chunks
+    for (const chunk of chunks) {
+      const embeddingRes = await axios.post(
+        "https://api.openai.com/v1/embeddings",
+        {
+          input: chunk,
+          model: "text-embedding-3-small",
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      const [{ embedding }] = embeddingRes.data.data;
+
+      const { error: insertError } = await supabase
+        .from("knowledge_chunks")
+        .insert([
+          {
+            accountant,
+            client,
+            filename,
+            content: chunk,
+            embedding,
+            category: null,
+            note: null,
+            upload_date: new Date().toISOString(),
+          },
+        ]);
+
+      if (insertError) throw insertError;
+    }
+
+    res.status(200).json({ message: "File uploaded and embedded!", key });
   } catch (err) {
-    console.error("🔴 Upload failed:", err);
+    console.error("🔴 Upload or embedding failed:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -132,10 +181,8 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-// ✅ Add AI Tax Report route
+// === ROUTES ===
 app.use("/api/report", generateReportRoute);
-
-// ✅ Add Chat With Docs route
 app.use("/api/chat-with-docs", chatWithDocsRoute);
 
 // === START SERVER ===
