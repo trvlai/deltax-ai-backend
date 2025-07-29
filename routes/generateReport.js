@@ -16,15 +16,35 @@ router.get("/:accountant/:client", async (req, res) => {
   const { accountant, client } = req.params;
 
   try {
-    const { data, error } = await supabase
+    // Try getting rows with notes
+    let { data, error } = await supabase
       .from("test_documents")
       .select("note")
       .eq("accountant", accountant)
-      .eq("client", client);
+      .eq("client", client)
+      .not("note", "is", null);
 
     if (error) throw error;
 
-    const notes = data.map((row) => row.note).join("\n\n");
+    let notes = data.map((row) => row.note).filter(Boolean).join("\n\n");
+
+    // Fallback: If no notes found, use all content
+    if (!notes || notes.trim().length < 10) {
+      console.warn("⚠️ No notes found. Using full content as fallback.");
+      const fallback = await supabase
+        .from("test_documents")
+        .select("content")
+        .eq("accountant", accountant)
+        .eq("client", client);
+
+      if (fallback.error) throw fallback.error;
+
+      notes = fallback.data.map((row) => row.content).filter(Boolean).join("\n\n");
+    }
+
+    if (!notes || notes.trim().length === 0) {
+      return res.status(404).json({ error: "No valid data found to generate report." });
+    }
 
     const prompt = `Based on the following notes, generate a final tax report for the client:\n\n${notes}`;
 
