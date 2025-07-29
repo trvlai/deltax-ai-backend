@@ -4,6 +4,7 @@ import multer from "multer";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 import axios from "axios";
+import generateReportRoute from "./routes/generateReport.js"; // ✅ NEW LINE
 
 dotenv.config();
 
@@ -128,6 +129,9 @@ app.post("/api/chat", async (req, res) => {
     });
   }
 });
+
+// ✅ Add AI Tax Report route
+app.use("/api/report", generateReportRoute);
 
 // === START SERVER ===
 const PORT = process.env.PORT || 3000;
