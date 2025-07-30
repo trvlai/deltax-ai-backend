@@ -16,7 +16,7 @@ router.get("/:accountant/:client", async (req, res) => {
   const { accountant, client } = req.params;
 
   try {
-    // Try getting rows with notes
+    // ✅ Try getting rows with AI-generated notes
     let { data, error } = await supabase
       .from("test_documents")
       .select("notes")
@@ -28,7 +28,7 @@ router.get("/:accountant/:client", async (req, res) => {
 
     let notes = data.map((row) => row.notes).filter(Boolean).join("\n\n");
 
-    // Fallback: If no notes found, use all content
+    // ✅ Fallback: If no notes found, use all content chunks
     if (!notes || notes.trim().length < 10) {
       console.warn("⚠️ No notes found. Using full content as fallback.");
       const fallback = await supabase
@@ -42,10 +42,12 @@ router.get("/:accountant/:client", async (req, res) => {
       notes = fallback.data.map((row) => row.content).filter(Boolean).join("\n\n");
     }
 
+    // ✅ If still no content, return 404
     if (!notes || notes.trim().length === 0) {
       return res.status(404).json({ error: "No valid data found to generate report." });
     }
 
+    // ✅ Build prompt and call OpenAI
     const prompt = `Based on the following notes, generate a final tax report for the client:\n\n${notes}`;
 
     const response = await axios.post(
