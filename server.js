@@ -48,14 +48,14 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     const data = await pdfParse.default(file.buffer);
     const fullText = data.text;
 
-    // 3. Chunk text (e.g. every ~500 chars)
+    // 3. Chunk text
     const chunks = [];
     const chunkSize = 500;
     for (let i = 0; i < fullText.length; i += chunkSize) {
       chunks.push(fullText.slice(i, i + chunkSize));
     }
 
-    // 4. Embed and insert into knowledge_chunks
+    // 4. Embed and insert each chunk into both test_documents and user_chunks
     for (const chunk of chunks) {
       const embeddingRes = await axios.post(
         "https://api.openai.com/v1/embeddings",
@@ -73,8 +73,9 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
       const [{ embedding }] = embeddingRes.data.data;
 
-      const { error: insertError } = await supabase
-        .from("knowledge_chunks")
+      // Insert into test_documents (for tax reports)
+      const { error: testDocError } = await supabase
+        .from("test_documents")
         .insert([
           {
             accountant,
@@ -83,12 +84,28 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
             content: chunk,
             embedding,
             category: null,
-            note: null,
+            note: notes || null,
             upload_date: new Date().toISOString(),
           },
         ]);
+      if (testDocError) throw testDocError;
 
-      if (insertError) throw insertError;
+      // Insert into user_chunks (for future RAG chat)
+      const { error: userChunkError } = await supabase
+        .from("user_chunks")
+        .insert([
+          {
+            accountant,
+            client,
+            filename,
+            content: chunk,
+            embedding,
+            category: null,
+            notes: notes || null,
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      if (userChunkError) throw userChunkError;
     }
 
     res.status(200).json({ message: "File uploaded and embedded!", key });
