@@ -45,10 +45,19 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
     // 2. Extract text if PDF
     let fullText = "";
+
+    console.log("🟡 File type:", file.mimetype);
+    console.log("🟡 File size:", file.buffer?.length);
+
     if (file.mimetype === "application/pdf") {
-      const pdfParse = await import("pdf-parse");
-      const data = await pdfParse.default(file.buffer);
-      fullText = data.text;
+      try {
+        const pdfParse = await import("pdf-parse");
+        const data = await pdfParse.default(file.buffer);
+        fullText = data.text;
+      } catch (err) {
+        console.error("🔴 PDF parsing failed:", err);
+        return res.status(400).json({ error: "Failed to parse PDF file." });
+      }
     } else {
       fullText = "[Image uploaded — no text extracted]";
     }
