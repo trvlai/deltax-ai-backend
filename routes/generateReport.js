@@ -19,14 +19,14 @@ router.get("/:accountant/:client", async (req, res) => {
     // Try getting rows with notes
     let { data, error } = await supabase
       .from("test_documents")
-      .select("note")
+      .select("notes")
       .eq("accountant", accountant)
       .eq("client", client)
-      .not("note", "is", null);
+      .not("notes", "is", null);
 
     if (error) throw error;
 
-    let notes = data.map((row) => row.note).filter(Boolean).join("\n\n");
+    let notes = data.map((row) => row.notes).filter(Boolean).join("\n\n");
 
     // Fallback: If no notes found, use all content
     if (!notes || notes.trim().length < 10) {
