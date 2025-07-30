@@ -6,11 +6,10 @@ import dotenv from "dotenv";
 import axios from "axios";
 import generateReportRoute from "./routes/generateReport.js";
 import chatWithDocsRoute from "./routes/chatWithDocs.js";
-
-// NEW DEPENDENCIES
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
-import { fromBuffer } from "pdf2pic";
-import Tesseract from "tesseract.js";
+import { getDocument } from "pdfjs-dist";
+import * as Tesseract from "tesseract.js";
+import { fromPath } from "pdf2pic";
+import fs from "fs";
 
 dotenv.config();
 
@@ -25,41 +24,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-async function extractTextFromPDF(buffer) {
-  const loadingTask = pdfjsLib.getDocument({ data: buffer });
-  const pdf = await loadingTask.promise;
-  let fullText = "";
-
-  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-    const page = await pdf.getPage(pageNum);
-    const content = await page.getTextContent();
-    const strings = content.items.map((item) => item.str);
-    fullText += strings.join(" ") + "\n";
-  }
-
-  return fullText.trim();
-}
-
-async function extractTextWithOCR(buffer) {
-  const converter = fromBuffer(buffer, {
-    density: 150,
-    format: "png",
-    savePath: "./tmp",
-    saveFilename: "ocr-page",
-    width: 1200,
-    height: 1600,
-  });
-
-  const images = await converter.bulk(-1);
-  let text = "";
-  for (const image of images) {
-    const result = await Tesseract.recognize(image.path, "eng");
-    text += result.data.text + "\n";
-  }
-
-  return text.trim();
-}
-
+// === FILE UPLOAD ===
 app.post("/api/upload", upload.single("file"), async (req, res) => {
   try {
     const { accountant, client, type, notes } = req.body;
@@ -72,11 +37,14 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     const filename = `${Date.now()}-${file.originalname}`;
     const key = `${accountant}/${client}/${filename}`;
 
+    // Upload to Supabase Storage
     const { error: uploadError } = await supabase.storage
       .from("deltax-uploads")
       .upload(key, file.buffer, { contentType: file.mimetype });
 
     if (uploadError) throw uploadError;
+
+    let fullText = "";
 
     console.log("🟡 Uploading:", {
       name: file.originalname,
@@ -84,25 +52,59 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       type: file.mimetype,
     });
 
-    let fullText = "";
-
     if (file.mimetype === "application/pdf") {
       try {
-        fullText = await extractTextFromPDF(file.buffer);
+        // Write buffer to temporary file for pdfjs/pdf2pic
+        const tmpPath = `./tmp-${Date.now()}.pdf`;
+        fs.writeFileSync(tmpPath, file.buffer);
 
-        // If failed to extract text, fallback to OCR
-        if (!fullText || fullText.trim().length < 10) {
-          console.warn("⚠️ PDF seems empty. Falling back to OCR...");
-          fullText = await extractTextWithOCR(file.buffer);
+        // 1. Try text extraction with pdfjs-dist
+        const doc = await getDocument(tmpPath).promise;
+        let extractedText = "";
+
+        for (let i = 1; i <= doc.numPages; i++) {
+          const page = await doc.getPage(i);
+          const content = await page.getTextContent();
+          const pageText = content.items.map((item) => item.str).join(" ");
+          extractedText += pageText + "\n\n";
         }
+
+        fullText = extractedText.trim();
+
+        // 2. If no text found, fallback to OCR
+        if (!fullText || fullText.length < 10) {
+          console.warn("⚠️ No selectable text found. Running OCR fallback.");
+          const convert = fromPath(tmpPath, {
+            density: 150,
+            saveFilename: "ocr-page",
+            savePath: "./",
+            format: "png",
+            width: 1200,
+            height: 1600,
+          });
+
+          const ocrTextArray = [];
+
+          for (let i = 1; i <= doc.numPages; i++) {
+            const imgPath = await convert(i);
+            const { data: { text } } = await Tesseract.recognize(imgPath.path, "eng");
+            ocrTextArray.push(text);
+            fs.unlinkSync(imgPath.path); // cleanup image file
+          }
+
+          fullText = ocrTextArray.join("\n\n").trim();
+        }
+
+        fs.unlinkSync(tmpPath); // cleanup temp PDF
       } catch (err) {
-        console.error("🔴 PDF parsing failed:", err.message);
-        return res.status(400).json({ error: "Failed to parse PDF file." });
+        console.error("🔴 PDF parsing or OCR failed:", err.message);
+        return res.status(400).json({ error: "Failed to extract text from PDF." });
       }
     } else {
       fullText = "[Image uploaded — no text extracted]";
     }
 
+    // === Chunk and Embed ===
     const chunks = [];
     const chunkSize = 500;
     for (let i = 0; i < fullText.length; i += chunkSize) {
@@ -162,6 +164,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   }
 });
 
+// === GET FILE LIST FOR ACCOUNTANT ===
 app.get("/api/files/:accountant", async (req, res) => {
   try {
     const { accountant } = req.params;
@@ -213,6 +216,7 @@ app.get("/api/files/:accountant", async (req, res) => {
   }
 });
 
+// === CHAT ROUTE ===
 app.post("/api/chat", async (req, res) => {
   try {
     const userMessage = req.body.message;
