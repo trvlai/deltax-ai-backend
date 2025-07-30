@@ -54,12 +54,8 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
     if (file.mimetype === "application/pdf") {
       try {
-        // Write buffer to temporary file for pdfjs/pdf2pic
-        const tmpPath = `./tmp-${Date.now()}.pdf`;
-        fs.writeFileSync(tmpPath, file.buffer);
-
-        // 1. Try text extraction with pdfjs-dist
-        const doc = await getDocument(tmpPath).promise;
+        // ✅ Extract directly from buffer using pdfjs-dist
+        const doc = await getDocument({ data: file.buffer }).promise;
         let extractedText = "";
 
         for (let i = 1; i <= doc.numPages; i++) {
@@ -71,9 +67,13 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
         fullText = extractedText.trim();
 
-        // 2. If no text found, fallback to OCR
+        // 🟡 Fallback to OCR if no text found
         if (!fullText || fullText.length < 10) {
           console.warn("⚠️ No selectable text found. Running OCR fallback.");
+
+          const tmpPath = `./tmp-${Date.now()}.pdf`;
+          fs.writeFileSync(tmpPath, file.buffer); // Write PDF for image conversion
+
           const convert = fromPath(tmpPath, {
             density: 150,
             saveFilename: "ocr-page",
@@ -87,15 +87,16 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
           for (let i = 1; i <= doc.numPages; i++) {
             const imgPath = await convert(i);
-            const { data: { text } } = await Tesseract.recognize(imgPath.path, "eng");
+            const {
+              data: { text },
+            } = await Tesseract.recognize(imgPath.path, "eng");
             ocrTextArray.push(text);
-            fs.unlinkSync(imgPath.path); // cleanup image file
+            fs.unlinkSync(imgPath.path); // Cleanup image
           }
 
+          fs.unlinkSync(tmpPath); // Cleanup temp PDF
           fullText = ocrTextArray.join("\n\n").trim();
         }
-
-        fs.unlinkSync(tmpPath); // cleanup temp PDF
       } catch (err) {
         console.error("🔴 PDF parsing or OCR failed:", err.message);
         return res.status(400).json({ error: "Failed to extract text from PDF." });
@@ -195,9 +196,7 @@ app.get("/api/files/:accountant", async (req, res) => {
         const {
           data: { signedUrl },
           error: urlError,
-        } = await supabase.storage
-          .from("deltax-uploads")
-          .createSignedUrl(fullPath, 60 * 60);
+        } = await supabase.storage.from("deltax-uploads").createSignedUrl(fullPath, 60 * 60);
 
         if (urlError) throw urlError;
 
