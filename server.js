@@ -6,7 +6,7 @@ import dotenv from "dotenv";
 import axios from "axios";
 import generateReportRoute from "./routes/generateReport.js";
 import chatWithDocsRoute from "./routes/chatWithDocs.js";
-import { getDocument } from "pdfjs-dist";
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import * as Tesseract from "tesseract.js";
 import { fromPath } from "pdf2pic";
 import fs from "fs";
