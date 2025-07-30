@@ -7,6 +7,11 @@ import axios from "axios";
 import generateReportRoute from "./routes/generateReport.js";
 import chatWithDocsRoute from "./routes/chatWithDocs.js";
 
+// NEW DEPENDENCIES
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
+import { fromBuffer } from "pdf2pic";
+import Tesseract from "tesseract.js";
+
 dotenv.config();
 
 const app = express();
@@ -20,7 +25,41 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// === FILE UPLOAD ===
+async function extractTextFromPDF(buffer) {
+  const loadingTask = pdfjsLib.getDocument({ data: buffer });
+  const pdf = await loadingTask.promise;
+  let fullText = "";
+
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const content = await page.getTextContent();
+    const strings = content.items.map((item) => item.str);
+    fullText += strings.join(" ") + "\n";
+  }
+
+  return fullText.trim();
+}
+
+async function extractTextWithOCR(buffer) {
+  const converter = fromBuffer(buffer, {
+    density: 150,
+    format: "png",
+    savePath: "./tmp",
+    saveFilename: "ocr-page",
+    width: 1200,
+    height: 1600,
+  });
+
+  const images = await converter.bulk(-1);
+  let text = "";
+  for (const image of images) {
+    const result = await Tesseract.recognize(image.path, "eng");
+    text += result.data.text + "\n";
+  }
+
+  return text.trim();
+}
+
 app.post("/api/upload", upload.single("file"), async (req, res) => {
   try {
     const { accountant, client, type, notes } = req.body;
@@ -33,14 +72,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     const filename = `${Date.now()}-${file.originalname}`;
     const key = `${accountant}/${client}/${filename}`;
 
-    // Upload to Supabase Storage
     const { error: uploadError } = await supabase.storage
       .from("deltax-uploads")
       .upload(key, file.buffer, { contentType: file.mimetype });
 
     if (uploadError) throw uploadError;
-
-    let fullText = "";
 
     console.log("🟡 Uploading:", {
       name: file.originalname,
@@ -48,11 +84,17 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       type: file.mimetype,
     });
 
+    let fullText = "";
+
     if (file.mimetype === "application/pdf") {
       try {
-        const pdfParse = await import("pdf-parse");
-        const data = await pdfParse.default(file.buffer);
-        fullText = data.text || "[Empty PDF]";
+        fullText = await extractTextFromPDF(file.buffer);
+
+        // If failed to extract text, fallback to OCR
+        if (!fullText || fullText.trim().length < 10) {
+          console.warn("⚠️ PDF seems empty. Falling back to OCR...");
+          fullText = await extractTextWithOCR(file.buffer);
+        }
       } catch (err) {
         console.error("🔴 PDF parsing failed:", err.message);
         return res.status(400).json({ error: "Failed to parse PDF file." });
@@ -91,7 +133,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         content: chunk,
         embedding,
         category: null,
-        notes: notes || null, // ✅ FIXED: changed from `note:` to `notes:`
+        notes: notes || null,
         upload_date: new Date().toISOString(),
       };
 
@@ -120,7 +162,6 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   }
 });
 
-// === GET FILE LIST FOR ACCOUNTANT ===
 app.get("/api/files/:accountant", async (req, res) => {
   try {
     const { accountant } = req.params;
@@ -172,7 +213,6 @@ app.get("/api/files/:accountant", async (req, res) => {
   }
 });
 
-// === CHAT ROUTE ===
 app.post("/api/chat", async (req, res) => {
   try {
     const userMessage = req.body.message;
