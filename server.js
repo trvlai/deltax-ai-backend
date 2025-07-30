@@ -20,6 +20,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// === FILE UPLOAD ===
 app.post("/api/upload", upload.single("file"), async (req, res) => {
   try {
     const { accountant, client, type, notes } = req.body;
@@ -39,7 +40,6 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
     if (uploadError) throw uploadError;
 
-    // Extract text or fallback
     let fullText = "";
 
     console.log("🟡 Uploading:", {
@@ -120,7 +120,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   }
 });
 
-// === GET FILES === (unchanged)
+// === GET FILE LIST FOR ACCOUNTANT ===
 app.get("/api/files/:accountant", async (req, res) => {
   try {
     const { accountant } = req.params;
@@ -140,6 +140,7 @@ app.get("/api/files/:accountant", async (req, res) => {
         .from("deltax-uploads")
         .list(prefix, {
           limit: 100,
+          offset: 0,
           sortBy: { column: "name", order: "asc" },
         });
 
@@ -147,13 +148,20 @@ app.get("/api/files/:accountant", async (req, res) => {
 
       for (const obj of files) {
         const fullPath = `${prefix}${obj.name}`;
-        const { data: signedUrl, error: urlError } = await supabase.storage
+        const {
+          data: { signedUrl },
+          error: urlError,
+        } = await supabase.storage
           .from("deltax-uploads")
-          .createSignedUrl(fullPath, 3600);
+          .createSignedUrl(fullPath, 60 * 60);
 
         if (urlError) throw urlError;
 
-        allFiles.push({ name: obj.name, url: signedUrl.signedUrl, client: folder.name });
+        allFiles.push({
+          name: obj.name,
+          url: signedUrl,
+          client: folder.name,
+        });
       }
     }
 
@@ -164,10 +172,39 @@ app.get("/api/files/:accountant", async (req, res) => {
   }
 });
 
-// === CHAT + REPORT ROUTES ===
-app.use("/api/chat", chatWithDocsRoute);
-app.use("/api/report", generateReportRoute);
+// === CHAT ROUTE ===
+app.post("/api/chat", async (req, res) => {
+  try {
+    const userMessage = req.body.message;
+    const response = await axios.post(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model: "gpt-4.1-mini",
+        messages: [
+          { role: "system", content: "You are a helpful accounting assistant." },
+          { role: "user", content: userMessage },
+        ],
+        temperature: 0.7,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+      }
+    );
+    const reply = response.data.choices[0].message.content;
+    res.status(200).json({ reply });
+  } catch (err) {
+    console.error("🔴 OpenAI API Error:", err.response?.data || err.message);
+    res.status(500).json({
+      error: "OpenAI Error",
+      details: err.response?.data || err.message,
+    });
+  }
+});
 
-// === START SERVER ===
+app.use("/api/report", generateReportRoute);
+app.use("/api/chat-with-docs", chatWithDocsRoute);
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
