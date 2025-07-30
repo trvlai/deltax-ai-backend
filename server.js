@@ -55,7 +55,8 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     if (file.mimetype === "application/pdf") {
       try {
         // ✅ Extract directly from buffer using pdfjs-dist
-        const doc = await getDocument({ data: file.buffer }).promise;
+        const uint8array = new Uint8Array(file.buffer);
+        const doc = await getDocument({ data: uint8array }).promise;
         let extractedText = "";
 
         for (let i = 1; i <= doc.numPages; i++) {
