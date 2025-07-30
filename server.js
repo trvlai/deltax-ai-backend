@@ -91,7 +91,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         content: chunk,
         embedding,
         category: null,
-        note: notes || null,
+        notes: notes || null, // ✅ FIXED: changed from `note:` to `notes:`
         upload_date: new Date().toISOString(),
       };
 
