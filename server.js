@@ -6,6 +6,9 @@ import dotenv from "dotenv";
 import axios from "axios";
 import generateReportRoute from "./routes/generateReport.js";
 import chatWithDocsRoute from "./routes/chatWithDocs.js";
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const pdfParse = require("pdf-parse");
 
 dotenv.config();
 
@@ -44,8 +47,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     if (uploadError) throw uploadError;
 
     // 2. Extract text from PDF
-    const pdfParse = await import("pdf-parse");
-    const data = await pdfParse.default(file.buffer);
+    const data = await pdfParse(file.buffer);
     const fullText = data.text;
 
     // 3. Chunk text
