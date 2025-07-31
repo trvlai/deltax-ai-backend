@@ -37,7 +37,6 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     const filename = `${Date.now()}-${file.originalname}`;
     const key = `${accountant}/${client}/${filename}`;
 
-    // Upload to Supabase Storage
     const { error: uploadError } = await supabase.storage
       .from("deltax-uploads")
       .upload(key, file.buffer, { contentType: file.mimetype });
@@ -54,7 +53,6 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
     if (file.mimetype === "application/pdf") {
       try {
-        // ✅ Extract directly from buffer using pdfjs-dist
         const uint8array = new Uint8Array(file.buffer);
         const doc = await getDocument({ data: uint8array }).promise;
         let extractedText = "";
@@ -68,12 +66,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
         fullText = extractedText.trim();
 
-        // 🟡 Fallback to OCR if no text found
         if (!fullText || fullText.length < 10) {
           console.warn("⚠️ No selectable text found. Running OCR fallback.");
 
           const tmpPath = `./tmp-${Date.now()}.pdf`;
-          fs.writeFileSync(tmpPath, file.buffer); // Write PDF for image conversion
+          fs.writeFileSync(tmpPath, file.buffer);
 
           const convert = fromPath(tmpPath, {
             density: 150,
@@ -92,10 +89,10 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
               data: { text },
             } = await Tesseract.recognize(imgPath.path, "eng");
             ocrTextArray.push(text);
-            fs.unlinkSync(imgPath.path); // Cleanup image
+            fs.unlinkSync(imgPath.path);
           }
 
-          fs.unlinkSync(tmpPath); // Cleanup temp PDF
+          fs.unlinkSync(tmpPath);
           fullText = ocrTextArray.join("\n\n").trim();
         }
       } catch (err) {
@@ -106,7 +103,6 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       fullText = "[Image uploaded — no text extracted]";
     }
 
-    // === Generate AI Summary Note ===
     let aiNote = null;
     try {
       const openaiRes = await axios.post(
@@ -137,7 +133,6 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       console.warn("⚠️ AI note generation failed:", err.message);
     }
 
-    // === Chunk and Embed ===
     const chunks = [];
     const chunkSize = 500;
     for (let i = 0; i < fullText.length; i += chunkSize) {
@@ -225,6 +220,7 @@ app.get("/api/files/:accountant", async (req, res) => {
 
       for (const obj of files) {
         const fullPath = `${prefix}${obj.name}`;
+
         const {
           data: { signedUrl },
           error: urlError,
@@ -232,10 +228,19 @@ app.get("/api/files/:accountant", async (req, res) => {
 
         if (urlError) throw urlError;
 
+        const { data: noteData, error: noteError } = await supabase
+          .from("test_documents")
+          .select("notes")
+          .eq("filename", obj.name)
+          .eq("accountant", accountant)
+          .eq("client", folder.name)
+          .maybeSingle();
+
         allFiles.push({
           name: obj.name,
           url: signedUrl,
           client: folder.name,
+          note: noteData?.notes || null,
         });
       }
     }
