@@ -106,6 +106,37 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       fullText = "[Image uploaded — no text extracted]";
     }
 
+    // === Generate AI Summary Note ===
+    let aiNote = null;
+    try {
+      const openaiRes = await axios.post(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          model: "gpt-4.1-mini",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are an accounting assistant. Summarize this document in one short sentence to help an accountant understand what it is.",
+            },
+            {
+              role: "user",
+              content: fullText.slice(0, 3000),
+            },
+          ],
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          },
+        }
+      );
+
+      aiNote = openaiRes.data.choices[0].message.content.trim();
+    } catch (err) {
+      console.warn("⚠️ AI note generation failed:", err.message);
+    }
+
     // === Chunk and Embed ===
     const chunks = [];
     const chunkSize = 500;
@@ -137,7 +168,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         content: chunk,
         embedding,
         category: null,
-        notes: notes || null,
+        notes: aiNote || notes || null,
         upload_date: new Date().toISOString(),
       };
 
@@ -148,7 +179,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         content: chunk,
         embedding,
         category: null,
-        notes: notes || null,
+        notes: aiNote || notes || null,
         created_at: new Date().toISOString(),
       };
 
