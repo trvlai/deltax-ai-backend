@@ -1,3 +1,4 @@
+
 import express from "express";
 import cors from "cors";
 import multer from "multer";
@@ -45,12 +46,6 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
 
     let fullText = "";
 
-    console.log("🟡 Uploading:", {
-      name: file.originalname,
-      size: file.size,
-      type: file.mimetype,
-    });
-
     if (file.mimetype === "application/pdf") {
       try {
         const uint8array = new Uint8Array(file.buffer);
@@ -61,14 +56,14 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
           const page = await doc.getPage(i);
           const content = await page.getTextContent();
           const pageText = content.items.map((item) => item.str).join(" ");
-          extractedText += pageText + "\n\n";
+          extractedText += pageText + "
+
+";
         }
 
         fullText = extractedText.trim();
 
         if (!fullText || fullText.length < 10) {
-          console.warn("⚠️ No selectable text found. Running OCR fallback.");
-
           const tmpPath = `./tmp-${Date.now()}.pdf`;
           fs.writeFileSync(tmpPath, file.buffer);
 
@@ -93,10 +88,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
           }
 
           fs.unlinkSync(tmpPath);
-          fullText = ocrTextArray.join("\n\n").trim();
+          fullText = ocrTextArray.join("
+
+").trim();
         }
       } catch (err) {
-        console.error("🔴 PDF parsing or OCR failed:", err.message);
         return res.status(400).json({ error: "Failed to extract text from PDF." });
       }
     } else {
@@ -104,6 +100,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     }
 
     let aiNote = null;
+    let aiCategory = null;
     try {
       const openaiRes = await axios.post(
         "https://api.openai.com/v1/chat/completions",
@@ -127,11 +124,34 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
           },
         }
       );
-
       aiNote = openaiRes.data.choices[0].message.content.trim();
-    } catch (err) {
-      console.warn("⚠️ AI note generation failed:", err.message);
-    }
+    } catch {}
+
+    try {
+      const categoryRes = await axios.post(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          model: "gpt-4.1-mini",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are an accounting assistant. Classify this document into one category: income, expenses, tax, payroll, invoice, receipt, or other.",
+            },
+            {
+              role: "user",
+              content: fullText.slice(0, 3000),
+            },
+          ],
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          },
+        }
+      );
+      aiCategory = categoryRes.data.choices[0].message.content.trim().toLowerCase();
+    } catch {}
 
     const chunks = [];
     const chunkSize = 500;
@@ -162,32 +182,16 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         filename,
         content: chunk,
         embedding,
-        category: null,
+        category: aiCategory,
         notes: aiNote || notes || null,
         upload_date: new Date().toISOString(),
       };
 
-      const chunkRow = {
-        accountant,
-        client,
-        filename,
-        content: chunk,
-        embedding,
-        category: null,
-        notes: aiNote || notes || null,
-        created_at: new Date().toISOString(),
-      };
-
-      const { error: testDocError } = await supabase.from("test_documents").insert([docRow]);
-      if (testDocError) throw testDocError;
-
-      const { error: userChunkError } = await supabase.from("user_chunks").insert([chunkRow]);
-      if (userChunkError) throw userChunkError;
+      await supabase.from("test_documents").insert([docRow]);
     }
 
     res.status(200).json({ message: "File uploaded and embedded!", key });
   } catch (err) {
-    console.error("🔴 Upload or embedding failed:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -228,9 +232,9 @@ app.get("/api/files/:accountant", async (req, res) => {
 
         if (urlError) throw urlError;
 
-        const { data: noteData, error: noteError } = await supabase
+        const { data: noteData } = await supabase
           .from("test_documents")
-          .select("notes")
+          .select("notes, category")
           .eq("filename", obj.name)
           .eq("accountant", accountant)
           .eq("client", folder.name)
@@ -241,45 +245,14 @@ app.get("/api/files/:accountant", async (req, res) => {
           url: signedUrl,
           client: folder.name,
           note: noteData?.notes || null,
+          category: noteData?.category || null,
         });
       }
     }
 
     res.status(200).json(allFiles);
   } catch (err) {
-    console.error("🔴 Listing failed:", err);
     res.status(500).json({ error: err.message });
-  }
-});
-
-// === CHAT ROUTE ===
-app.post("/api/chat", async (req, res) => {
-  try {
-    const userMessage = req.body.message;
-    const response = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        model: "gpt-4.1-mini",
-        messages: [
-          { role: "system", content: "You are a helpful accounting assistant." },
-          { role: "user", content: userMessage },
-        ],
-        temperature: 0.7,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
-      }
-    );
-    const reply = response.data.choices[0].message.content;
-    res.status(200).json({ reply });
-  } catch (err) {
-    console.error("🔴 OpenAI API Error:", err.response?.data || err.message);
-    res.status(500).json({
-      error: "OpenAI Error",
-      details: err.response?.data || err.message,
-    });
   }
 });
 
