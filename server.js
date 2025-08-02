@@ -35,7 +35,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     }
 
     const filename = `${Date.now()}-${file.originalname}`;
-    const key = ${accountant}/${client}/${filename};
+    const key = `${accountant}/${client}/${filename}`;
 
     const { error: uploadError } = await supabase.storage
       .from("deltax-uploads")
