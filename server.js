@@ -145,9 +145,9 @@ You are an AI assistant for accountants. Categorize the following document into 
 Respond with ONLY the category name.
 
 Document content:
-\\`\\`\\`
-\${fullText.slice(0, 1000)}
-\\`\\`\\`
+\`\`\`
+${fullText.slice(0, 1000)}
+\`\`\`
 `;
       const openaiCategory = await axios.post(
         "https://api.openai.com/v1/chat/completions",
