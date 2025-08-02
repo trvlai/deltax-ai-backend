@@ -69,7 +69,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         if (!fullText || fullText.length < 10) {
           console.warn("⚠️ No selectable text found. Running OCR fallback.");
 
-          const tmpPath = ./tmp-${Date.now()}.pdf;
+          const tmpPath = `./tmp-${Date.now()}.pdf`;
           fs.writeFileSync(tmpPath, file.buffer);
 
           const convert = fromPath(tmpPath, {
