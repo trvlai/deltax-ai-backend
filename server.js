@@ -104,31 +104,74 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     }
 
     let aiNote = null;
-    try {
-      const openaiRes = await axios.post(
-        "https://api.openai.com/v1/chat/completions",
+let category = null;
+
+try {
+  // === NOTE GENERATION ===
+  const openaiNote = await axios.post(
+    "https://api.openai.com/v1/chat/completions",
+    {
+      model: "gpt-4.1-mini",
+      messages: [
         {
-          model: "gpt-4.1-mini",
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are an accounting assistant. Summarize this document in one short sentence to help an accountant understand what it is.",
-            },
-            {
-              role: "user",
-              content: fullText.slice(0, 3000),
-            },
-          ],
+          role: "system",
+          content:
+            "You are an accounting assistant. Summarize this document in one short sentence to help an accountant understand what it is.",
         },
         {
-          headers: {
-            Authorization: Bearer ${process.env.OPENAI_API_KEY},
-          },
-        }
-      );
+          role: "user",
+          content: fullText.slice(0, 3000),
+        },
+      ],
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+    }
+  );
 
-      aiNote = openaiRes.data.choices[0].message.content.trim();
+  aiNote = openaiNote.data.choices[0].message.content.trim();
+
+  // === CATEGORY GENERATION ===
+  try {
+    const categoryPrompt = `
+You are an AI assistant for accountants. Categorize the following document into one of these categories:
+- income
+- expenses
+- tax
+- salary
+- insurance
+- receipt
+- unclear
+
+Respond with ONLY the category name.
+
+Document content:
+${fullText.slice(0, 1000)}`;
+    const openaiCategory = await axios.post(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model: "gpt-4.1-mini",
+        messages: [{ role: "user", content: categoryPrompt }],
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+      }
+    );
+    const rawCategory = openaiCategory.data.choices[0].message.content.trim().toLowerCase();
+    category = rawCategory.replace(/[^a-z]/g, "") || "unclear";
+  } catch (err) {
+    console.warn("⚠️ AI category generation failed:", err.message);
+    category = "unclear";
+  }
+
+} catch (err) {
+  console.warn("⚠️ AI note generation failed:", err.message);
+  category = "unclear";
+}
     } catch (err) {
       console.warn("⚠️ AI note generation failed:", err.message);
     }
@@ -148,7 +191,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         },
         {
           headers: {
-            Authorization: Bearer ${process.env.OPENAI_API_KEY},
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
             "Content-Type": "application/json",
           },
         }
@@ -162,7 +205,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         filename,
         content: chunk,
         embedding,
-        category: null,
+        category,
         notes: aiNote || notes || null,
         upload_date: new Date().toISOString(),
       };
@@ -173,7 +216,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         filename,
         content: chunk,
         embedding,
-        category: null,
+        category,
         notes: aiNote || notes || null,
         created_at: new Date().toISOString(),
       };
@@ -198,7 +241,7 @@ app.get("/api/files/:accountant", async (req, res) => {
     const { accountant } = req.params;
     const { data: folders, error: folderError } = await supabase.storage
       .from("deltax-uploads")
-      .list(${accountant}/, { limit: 100 });
+      .list(`${accountant}/`, { limit: 100 });
 
     if (folderError) throw folderError;
 
@@ -206,7 +249,7 @@ app.get("/api/files/:accountant", async (req, res) => {
 
     for (const folder of folders) {
       if (!folder.name) continue;
-      const prefix = ${accountant}/${folder.name}/;
+      const prefix = `${accountant}/${folder.name}/`;
 
       const { data: files, error: listError } = await supabase.storage
         .from("deltax-uploads")
@@ -219,7 +262,7 @@ app.get("/api/files/:accountant", async (req, res) => {
       if (listError) throw listError;
 
       for (const obj of files) {
-        const fullPath = ${prefix}${obj.name};
+        const fullPath = `${prefix}${obj.name}`;
 
         const {
           data: { signedUrl },
@@ -268,7 +311,7 @@ app.post("/api/chat", async (req, res) => {
       },
       {
         headers: {
-          Authorization: Bearer ${process.env.OPENAI_API_KEY},
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         },
       }
     );
@@ -287,15 +330,5 @@ app.use("/api/report", generateReportRoute);
 app.use("/api/chat-with-docs", chatWithDocsRoute);
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(✅ Server running on port ${PORT}));
+app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 
-// ✅ TEMPORARY TEST ROUTE TO RUN categorizeDocuments.js
-app.get('/api/run-categorization', async (req, res) => {
-  try {
-    await import('./routes/categorizeDocuments.js');
-    res.send('✅ Categorization script executed');
-  } catch (err) {
-    console.error('❌ Categorization failed:', err.message);
-    res.status(500).send('❌ Error running categorizeDocuments.js');
-  }
-});
