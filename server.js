@@ -103,39 +103,36 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       fullText = "[Image uploaded — no text extracted]";
     }
 
-    let aiNote = null;
-let category = null;
-
-try {
-  // === NOTE GENERATION ===
-  const openaiNote = await axios.post(
-    "https://api.openai.com/v1/chat/completions",
-    {
-      model: "gpt-4.1-mini",
-      messages: [
+        let aiNote = null;
+    let category = null;
+    try {
+      // === NOTE GENERATION ===
+      const openaiNote = await axios.post(
+        "https://api.openai.com/v1/chat/completions",
         {
-          role: "system",
-          content:
-            "You are an accounting assistant. Summarize this document in one short sentence to help an accountant understand what it is.",
+          model: "gpt-4.1-mini",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are an accounting assistant. Summarize this document in one short sentence to help an accountant understand what it is.",
+            },
+            {
+              role: "user",
+              content: fullText.slice(0, 3000),
+            },
+          ],
         },
         {
-          role: "user",
-          content: fullText.slice(0, 3000),
-        },
-      ],
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      },
-    }
-  );
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          },
+        }
+      );
+      aiNote = openaiNote.data.choices[0].message.content.trim();
 
-  aiNote = openaiNote.data.choices[0].message.content.trim();
-
-  // === CATEGORY GENERATION ===
-  try {
-    const categoryPrompt = `
+      // === CATEGORY GENERATION ===
+      const categoryPrompt = `
 You are an AI assistant for accountants. Categorize the following document into one of these categories:
 - income
 - expenses
@@ -148,32 +145,25 @@ You are an AI assistant for accountants. Categorize the following document into 
 Respond with ONLY the category name.
 
 Document content:
-${fullText.slice(0, 1000)}`;
-    const openaiCategory = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        model: "gpt-4.1-mini",
-        messages: [{ role: "user", content: categoryPrompt }],
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+```${fullText.slice(0, 1000)}```
+      `;
+      const openaiCategory = await axios.post(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          model: "gpt-4.1-mini",
+          messages: [{ role: "user", content: categoryPrompt }],
         },
-      }
-    );
-    const rawCategory = openaiCategory.data.choices[0].message.content.trim().toLowerCase();
-    category = rawCategory.replace(/[^a-z]/g, "") || "unclear";
-  } catch (err) {
-    console.warn("⚠️ AI category generation failed:", err.message);
-    category = "unclear";
-  }
-
-} catch (err) {
-  console.warn("⚠️ AI note generation failed:", err.message);
-  category = "unclear";
-}
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          },
+        }
+      );
+      const rawCategory = openaiCategory.data.choices[0].message.content.trim().toLowerCase();
+      category = rawCategory.replace(/[^a-z]/g, "") || "unclear";
     } catch (err) {
-      console.warn("⚠️ AI note generation failed:", err.message);
+      console.warn("⚠️ AI note or category generation failed:", err.message);
+      category = "unclear";
     }
 
     const chunks = [];
@@ -331,4 +321,3 @@ app.use("/api/chat-with-docs", chatWithDocsRoute);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
-
