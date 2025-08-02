@@ -34,7 +34,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       return res.status(400).json({ error: "Missing file, accountant, or client." });
     }
 
-    const filename = ${Date.now()}-${file.originalname};
+    const filename = `${Date.now()}-${file.originalname}`;
     const key = ${accountant}/${client}/${filename};
 
     const { error: uploadError } = await supabase.storage
