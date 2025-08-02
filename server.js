@@ -288,3 +288,14 @@ app.use("/api/chat-with-docs", chatWithDocsRoute);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+
+// ✅ TEMPORARY TEST ROUTE TO RUN categorizeDocuments.js
+app.get('/api/run-categorization', async (req, res) => {
+  try {
+    await import('./scripts/categorizeDocuments.js');
+    res.send('✅ Categorization script executed');
+  } catch (err) {
+    console.error('❌ Categorization failed:', err.message);
+    res.status(500).send('❌ Error running categorizeDocuments.js');
+  }
+});
