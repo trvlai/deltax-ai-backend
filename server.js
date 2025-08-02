@@ -34,8 +34,8 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       return res.status(400).json({ error: "Missing file, accountant, or client." });
     }
 
-    const filename = `${Date.now()}-${file.originalname}`;
-    const key = `${accountant}/${client}/${filename}`;
+    const filename = ${Date.now()}-${file.originalname};
+    const key = ${accountant}/${client}/${filename};
 
     const { error: uploadError } = await supabase.storage
       .from("deltax-uploads")
@@ -69,7 +69,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         if (!fullText || fullText.length < 10) {
           console.warn("⚠️ No selectable text found. Running OCR fallback.");
 
-          const tmpPath = `./tmp-${Date.now()}.pdf`;
+          const tmpPath = ./tmp-${Date.now()}.pdf;
           fs.writeFileSync(tmpPath, file.buffer);
 
           const convert = fromPath(tmpPath, {
@@ -123,7 +123,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         },
         {
           headers: {
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            Authorization: Bearer ${process.env.OPENAI_API_KEY},
           },
         }
       );
@@ -148,7 +148,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
         },
         {
           headers: {
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            Authorization: Bearer ${process.env.OPENAI_API_KEY},
             "Content-Type": "application/json",
           },
         }
@@ -198,7 +198,7 @@ app.get("/api/files/:accountant", async (req, res) => {
     const { accountant } = req.params;
     const { data: folders, error: folderError } = await supabase.storage
       .from("deltax-uploads")
-      .list(`${accountant}/`, { limit: 100 });
+      .list(${accountant}/, { limit: 100 });
 
     if (folderError) throw folderError;
 
@@ -206,7 +206,7 @@ app.get("/api/files/:accountant", async (req, res) => {
 
     for (const folder of folders) {
       if (!folder.name) continue;
-      const prefix = `${accountant}/${folder.name}/`;
+      const prefix = ${accountant}/${folder.name}/;
 
       const { data: files, error: listError } = await supabase.storage
         .from("deltax-uploads")
@@ -219,7 +219,7 @@ app.get("/api/files/:accountant", async (req, res) => {
       if (listError) throw listError;
 
       for (const obj of files) {
-        const fullPath = `${prefix}${obj.name}`;
+        const fullPath = ${prefix}${obj.name};
 
         const {
           data: { signedUrl },
@@ -268,7 +268,7 @@ app.post("/api/chat", async (req, res) => {
       },
       {
         headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          Authorization: Bearer ${process.env.OPENAI_API_KEY},
         },
       }
     );
@@ -287,7 +287,7 @@ app.use("/api/report", generateReportRoute);
 app.use("/api/chat-with-docs", chatWithDocsRoute);
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(✅ Server running on port ${PORT}));
 
 // ✅ TEMPORARY TEST ROUTE TO RUN categorizeDocuments.js
 app.get('/api/run-categorization', async (req, res) => {
