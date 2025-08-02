@@ -103,7 +103,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       fullText = "[Image uploaded — no text extracted]";
     }
 
-        let aiNote = null;
+    let aiNote = null;
     let category = null;
     try {
       // === NOTE GENERATION ===
@@ -145,8 +145,10 @@ You are an AI assistant for accountants. Categorize the following document into 
 Respond with ONLY the category name.
 
 Document content:
-```${fullText.slice(0, 1000)}```
-      `;
+\\`\\`\\`
+\${fullText.slice(0, 1000)}
+\\`\\`\\`
+`;
       const openaiCategory = await axios.post(
         "https://api.openai.com/v1/chat/completions",
         {
