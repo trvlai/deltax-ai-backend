@@ -205,7 +205,7 @@ ${fullText.slice(0, 1000)}`;
         filename,
         content: chunk,
         embedding,
-        category,
+        category: null,
         notes: aiNote || notes || null,
         upload_date: new Date().toISOString(),
       };
@@ -216,7 +216,7 @@ ${fullText.slice(0, 1000)}`;
         filename,
         content: chunk,
         embedding,
-        category,
+        category: null,
         notes: aiNote || notes || null,
         created_at: new Date().toISOString(),
       };
